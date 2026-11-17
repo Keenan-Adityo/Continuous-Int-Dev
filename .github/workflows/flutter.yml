@@ -11,16 +11,32 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Matches the project's Dart SDK requirement (^3.13.7).
+          flutter-version: '3.47.9'
           cache: true
+
+      - name: Verify toolchain versions
+        run: |
+          flutter --version
+          java -version
+          xcodebuild -version
 
       - name: Install dependencies
         run: flutter pub get
@@ -36,3 +52,6 @@ jobs:
 
       - name: Check Android build
         run: flutter build apk --debug
+
+      - name: Check iOS build
+        run: flutter build ios --release --no-codesign
