@@ -3,8 +3,21 @@ name: Flutter CI
 on:
   push:
     branches: ["main"]
+    paths: &flutter_paths
+      - '**/*.dart'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'analysis_options.yaml'
+      - 'build.yaml'
+      - 'l10n.yaml'
+      - '**/*.arb'
+      - 'assets/**'
+      - 'fonts/**'
+      - 'android/**'
+      - 'ios/**'
   pull_request:
     branches: ["main"]
+    paths: *flutter_paths
 
 permissions:
   contents: read
