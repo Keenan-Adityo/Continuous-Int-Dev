@@ -1,0 +1,124 @@
+# Copy to .github/workflows/firebase.yml after completing README.md in this folder.
+name: Firebase Android testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'New positive build number, higher than all previous Android builds'
+        required: true
+        type: string
+      release_notes:
+        description: 'What should testers check?'
+        required: true
+        default: 'Everyday wallet testing'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-android-distribution
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: firebase-testing
+    env:
+      # Resolve the project's Flutter/Dart version mismatch before activation.
+      FLUTTER_VERSION: ${{ vars.FLUTTER_VERSION || '3.44.5' }}
+      FIREBASE_APP_ID: ${{ vars.FIREBASE_ANDROID_APP_ID }}
+      FIREBASE_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      RELEASE_NOTES: ${{ inputs.release_notes }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-service-account.json
+      ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-release.jks
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate configuration
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] && [ "$BUILD_NUMBER" -le 2100000000 ]
+          for name in FIREBASE_APP_ID FIREBASE_GROUPS KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD FIREBASE_SERVICE_ACCOUNT_JSON; do
+            test -n "${!name}" || { echo "Missing configuration: $name"; exit 1; }
+          done
+          # Apply the release signing snippet in this folder's README first.
+          grep -Fq 'System.getenv("ANDROID_KEYSTORE_PATH")' android/app/build.gradle.kts
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Validate the selected source revision
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+      - name: Restore signing and Firebase credentials
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          umask 077
+          python3 - <<'PY'
+          import base64, json, os
+          from pathlib import Path
+          Path(os.environ['ANDROID_KEYSTORE_PATH']).write_bytes(
+              base64.b64decode(os.environ['KEYSTORE_BASE64'], validate=True))
+          credentials = json.loads(os.environ['FIREBASE_SERVICE_ACCOUNT_JSON'])
+          Path(os.environ['GOOGLE_APPLICATION_CREDENTIALS']).write_text(json.dumps(credentials))
+          PY
+
+      - name: Build signed release APK
+        run: flutter build apk --release --build-number="$BUILD_NUMBER"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Firebase CLI
+        # Set FIREBASE_TOOLS_VERSION to a tested exact version before activation.
+        env:
+          FIREBASE_TOOLS_VERSION: ${{ vars.FIREBASE_TOOLS_VERSION }}
+        run: |
+          test -n "$FIREBASE_TOOLS_VERSION"
+          npm install --global "firebase-tools@$FIREBASE_TOOLS_VERSION"
+
+      - name: Distribute APK to the tester group
+        run: |
+          firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+            --app "$FIREBASE_APP_ID" \
+            --groups "$FIREBASE_GROUPS" \
+            --release-notes "$RELEASE_NOTES" \
+            --non-interactive
+
+      - name: Remove temporary credentials
+        if: ${{ always() }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          for name in ('ANDROID_KEYSTORE_PATH', 'GOOGLE_APPLICATION_CREDENTIALS'):
+              Path(os.environ[name]).unlink(missing_ok=True)
+          PY

@@ -33,7 +33,18 @@ flutter build apk --debug
 flutter build ios --release --no-codesign
 ```
 
-CI runs for Flutter source, dependency, asset, localization, and native platform changes on pushes and pull requests to main.
+CI starts on every push and pull request to main. A lightweight change detector runs
+Flutter tests and builds only for source, dependency, asset, localization, native,
+or CI configuration changes. The final `Flutter CI required` check succeeds only
+when those builds pass or when no relevant changes require a build.
+
+To enforce merging rules in GitHub, create an active branch ruleset for `main`,
+require pull requests, and require the `Flutter CI required` status check from
+GitHub Actions. Enable requiring branches to be up to date and leave bypasses
+empty if the rule should apply to everyone. Run the workflow once so the check
+is available to select. The YAML alone does not enforce branch protection.
+Avoid skip-CI commit messages on PRs: they prevent even the required check from
+running. If a merge queue is introduced, add `merge_group` support before enabling it.
 
 ## Structure
 
@@ -52,3 +63,14 @@ connection, cloud sync, export, or app-level encryption. Removing the app can re
 local data. System device backups depend on device settings.
 
 No commits are created by the agent; changes remain available for review.
+
+## Distribution templates
+
+Manual testing-upload examples and their credential/signing setup are documented
+in [.github/workflow-templates/README.md](.github/workflow-templates/README.md):
+
+- [TestFlight iOS IPA upload](.github/workflow-templates/testflight.yml)
+- [Firebase Android APK distribution](.github/workflow-templates/firebase.yml)
+
+Copy a configured template into `.github/workflows/` to activate it. These
+examples are inactive and no distribution credentials are stored in the repository.
