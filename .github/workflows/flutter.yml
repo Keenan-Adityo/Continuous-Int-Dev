@@ -3,27 +3,31 @@ name: Flutter CI
 on:
   push:
     branches: ["main"]
-    paths: &flutter_paths
-      - '**/*.dart'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'analysis_options.yaml'
-      - 'build.yaml'
-      - 'l10n.yaml'
-      - '**/*.arb'
-      - 'assets/**'
-      - 'fonts/**'
-      - 'android/**'
-      - 'ios/**'
   pull_request:
     branches: ["main"]
-    paths: *flutter_paths
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect Flutter changes
+    runs-on: ubuntu-latest
+    outputs:
+      flutter: ${{ steps.detect.outputs.flutter }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect relevant changes
+        id: detect
+        run: python3 .github/scripts/flutter_changes.py
+
   build:
+    name: Flutter tests and builds
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
@@ -68,3 +72,28 @@ jobs:
 
       - name: Check iOS build
         run: flutter build ios --release --no-codesign
+
+  required:
+    name: Flutter CI required
+    if: ${{ always() }}
+    needs: [changes, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FLUTTER_CHANGED: ${{ needs.changes.outputs.flutter }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "Change detection failed or was cancelled."
+            exit 1
+          fi
+          if [ "$FLUTTER_CHANGED" = "true" ] && [ "$BUILD_RESULT" = "success" ]; then
+            echo "Flutter tests and builds passed."
+          elif [ "$FLUTTER_CHANGED" = "false" ] && [ "$BUILD_RESULT" = "skipped" ]; then
+            echo "No Flutter-related changes; tests and builds are not needed."
+          else
+            echo "Required Flutter tests and builds did not succeed."
+            exit 1
+          fi

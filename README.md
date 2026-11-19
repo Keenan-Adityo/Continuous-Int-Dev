@@ -9,6 +9,9 @@ An offline everyday wallet for Android and iOS, built with Flutter, BLoC, and fe
 - View your all-time balance and monthly income, expenses, and cash flow.
 - Browse months, search transaction titles/notes/categories, and filter income or expenses.
 - See monthly spending grouped by category.
+- Schedule daily, weekly, monthly, or yearly income and expenses.
+- Review in-app due reminders; confirm or skip each occurrence, and pause, edit, or delete schedules.
+- Track savings goals with target amounts, optional target dates, contributions, and progress.
 - Start with an empty wallet; record an opening balance as income if needed.
 
 ## Run
@@ -33,7 +36,18 @@ flutter build apk --debug
 flutter build ios --release --no-codesign
 ```
 
-CI runs for Flutter source, dependency, asset, localization, and native platform changes on pushes and pull requests to main.
+CI starts on every push and pull request to main. A lightweight change detector runs
+Flutter tests and builds only for source, dependency, asset, localization, native,
+or CI configuration changes. The final `Flutter CI required` check succeeds only
+when those builds pass or when no relevant changes require a build.
+
+To enforce merging rules in GitHub, create an active branch ruleset for `main`,
+require pull requests, and require the `Flutter CI required` status check from
+GitHub Actions. Enable requiring branches to be up to date and leave bypasses
+empty if the rule should apply to everyone. Run the workflow once so the check
+is available to select. The YAML alone does not enforce branch protection.
+Avoid skip-CI commit messages on PRs: they prevent even the required check from
+running. If a merge queue is introduced, add `merge_group` support before enabling it.
 
 ## Structure
 
@@ -45,10 +59,63 @@ Dependencies are wired in `lib/main.dart`; domain code has no Flutter dependenci
 
 ## Storage
 
-Transactions are saved on this device to `pocket_wallet.json`. Writes flush to a temporary
+Transactions, recurring schedules, and savings goals are saved together on this device to `pocket_wallet.json`. Writes flush to a temporary
 file before replacing the previous file. Failed reads keep the original data and block
 editing; failed writes leave the displayed wallet unchanged. The wallet has no bank
 connection, cloud sync, export, or app-level encryption. Removing the app can remove its
 local data. System device backups depend on device settings.
 
 No commits are created by the agent; changes remain available for review.
+
+## Distribution templates
+
+Manual testing-upload examples and their credential/signing setup are documented
+in [.github/workflow-templates/README.md](.github/workflow-templates/README.md):
+
+- [TestFlight iOS IPA upload](.github/workflow-templates/testflight.yml)
+- [Firebase Android APK distribution](.github/workflow-templates/firebase.yml)
+
+Copy a configured template into `.github/workflows/` to activate it. These
+examples are inactive and no distribution credentials are stored in the repository.
+
+## Recurring transactions
+
+Open **Recurring → Add schedule** to enter an amount, title, category, repeat
+frequency, first due date, and optional note. Schedules do not change the balance.
+Due reminders appear on Overview and in Recurring, and refresh when the app
+resumes or while it remains open. This version uses in-app reminders only.
+
+Use **Record occurrence → Confirm record** to record a transaction on its due
+date and advance to the next date in one saved change. **Skip occurrence** advances
+one date without recording money. Missed occurrences are reviewed individually;
+future and paused occurrences cannot be recorded. Monthly dates retain the
+original day after a short month; yearly February 29 schedules regain that date
+in leap years. Pause/resume keeps the next unreviewed date. Deleting a schedule
+keeps transactions already recorded. Editing the next due date or frequency
+starts a new date anchor; editing other details preserves it.
+
+Existing version 1 and 2 wallet files load without modification. Missing schedule
+or goal lists start empty. The next successful save writes version 3, including
+transactions, recurring schedules, goals, and contributions. Older app versions
+cannot read version 3 files. Invalid wallet files remain untouched and cannot be
+overwritten through the UI.
+
+## Savings goals
+
+Open **Goals → Add goal** to choose a name, target amount in rupiah, and an
+optional target date. Overview shows tracked savings separately from the wallet
+balance and links to the Goals tab. Each goal displays its saved amount,
+remaining amount, progress, and target-date status. Fully funded goals move to
+Achieved; missed dates remain visible until the goal is completed or edited.
+
+**Add contribution** records savings you have already set aside. Contributions
+are tracking records: they do not move money, create income or expense entries,
+or change the wallet balance. They must be positive, no larger than the remaining
+target, and dated today or earlier. **Contribution history → Undo contribution**
+removes a contribution after confirmation and updates progress. Undoing a deposit
+can reopen an achieved goal.
+
+Edit a goal to rename it, increase its target, or change/remove its target date.
+Existing contributions are preserved; the target cannot be reduced below the
+amount already saved. Deleting a goal requires confirmation and removes its
+contribution history while keeping wallet transactions and schedules.

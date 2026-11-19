@@ -1,6 +1,6 @@
-import '../entities/wallet_entry.dart';
+import '../entities/wallet_data.dart';
 
 abstract interface class WalletRepository {
-  Future<List<WalletEntry>> load();
-  Future<void> save(List<WalletEntry> entries);
+  Future<WalletData> load();
+  Future<void> save(WalletData data);
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
@@ -5,9 +7,14 @@ import 'package:intl/intl.dart';
 import '../../../../core/presentation/app_theme.dart';
 import '../../../../core/presentation/widgets/section_card.dart';
 import '../../domain/entities/wallet_entry.dart';
+import '../../domain/entities/recurring_transaction.dart';
+import '../../domain/entities/savings_goal.dart';
 import '../../domain/usecases/manage_wallet.dart';
 import '../bloc/wallet_bloc.dart';
 import '../widgets/entry_sheet.dart';
+import '../widgets/recurring_panel.dart';
+import '../widgets/goals_panel.dart';
+import '../widgets/goal_sheets.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/wallet_format.dart';
 
@@ -17,13 +24,46 @@ class WalletPage extends StatefulWidget {
   State<WalletPage> createState() => _WalletPageState();
 }
 
-class _WalletPageState extends State<WalletPage> {
+class _WalletPageState extends State<WalletPage> with WidgetsBindingObserver {
+  late final Timer _reminderTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _reminderTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _refreshReminders(),
+    );
+  }
+
+  void _refreshReminders() {
+    context.read<WalletBloc>().add(WalletClockTicked());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshReminders();
+  }
+
+  @override
+  void dispose() {
+    _reminderTimer.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   int _tab = 0;
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   EntryType? _filter;
   String _search = '';
 
-  void _openEntry({WalletEntry? entry, EntryType type = EntryType.expense}) {
+  void _openEntry({
+    WalletEntry? entry,
+    EntryType type = EntryType.expense,
+    bool isRecurring = false,
+    RecurringTransaction? schedule,
+  }) {
     final bloc = context.read<WalletBloc>();
     showModalBottomSheet<void>(
       context: context,
@@ -33,9 +73,152 @@ class _WalletPageState extends State<WalletPage> {
       useSafeArea: true,
       builder: (_) => BlocProvider.value(
         value: bloc,
-        child: EntrySheet(entry: entry, initialType: type),
+        child: EntrySheet(
+          entry: entry,
+          initialType: type,
+          isRecurring: isRecurring,
+          schedule: schedule,
+        ),
       ),
     );
+  }
+
+  void _openGoalSheet({SavingsGoal? goal, bool contribution = false}) {
+    final bloc = context.read<WalletBloc>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      useSafeArea: true,
+      builder: (_) => BlocProvider.value(
+        value: bloc,
+        child: contribution
+            ? GoalContributionSheet(goal: goal!)
+            : GoalEditorSheet(goal: goal),
+      ),
+    );
+  }
+
+  Future<bool> _confirmGoalAction(
+    String title,
+    String message,
+    String label,
+  ) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(label),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _deleteGoal(SavingsGoal goal) async {
+    final confirmed = await _confirmGoalAction(
+      'Delete savings goal?',
+      'This removes the goal and its contribution history. Your wallet balance and transactions will stay the same.',
+      'Delete goal',
+    );
+    if (confirmed && mounted) {
+      context.read<WalletBloc>().add(GoalDeleted(goal.id));
+    }
+  }
+
+  Future<void> _removeContribution(
+    SavingsGoal goal,
+    GoalContribution contribution,
+  ) async {
+    final confirmed = await _confirmGoalAction(
+      'Undo contribution?',
+      'Remove ${money(contribution.amount)} from this goal’s tracked savings? Your wallet balance will stay the same.',
+      'Undo contribution',
+    );
+    if (confirmed && mounted) {
+      context.read<WalletBloc>().add(
+        GoalContributionRemoved(goal.id, contribution.id),
+      );
+    }
+  }
+
+  void _openGoalHistory(SavingsGoal goal) {
+    final bloc = context.read<WalletBloc>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => BlocProvider.value(
+        value: bloc,
+        child: GoalHistorySheet(goalId: goal.id, onRemove: _removeContribution),
+      ),
+    );
+  }
+
+  Future<void> _resolveOccurrence(
+    RecurringTransaction schedule, {
+    required bool record,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          record ? 'Record this occurrence?' : 'Skip this occurrence?',
+        ),
+        content: Text(
+          '${schedule.title} · ${money(schedule.amount)}\nDue ${DateFormat('d MMM yyyy').format(schedule.nextDueDate)}\n\n${record ? 'This will add the transaction on its due date and update your balance.' : 'This advances the schedule without changing your balance.'}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(record ? 'Confirm record' : 'Confirm skip'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      context.read<WalletBloc>().add(
+        OccurrenceResolved(schedule.id, schedule.nextDueDate, record: record),
+      );
+    }
+  }
+
+  Future<void> _deleteSchedule(RecurringTransaction schedule) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete schedule?'),
+        content: const Text(
+          'Reminders for this schedule will stop. Transactions already recorded will be kept.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete schedule'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      context.read<WalletBloc>().add(ScheduleDeleted(schedule.id));
+    }
   }
 
   @override
@@ -146,11 +329,19 @@ class _WalletPageState extends State<WalletPage> {
             ),
       floatingActionButton: state.status == WalletStatus.ready
           ? FloatingActionButton.extended(
-              onPressed: () => _openEntry(),
+              onPressed: () => _tab == 4
+                  ? _openGoalSheet()
+                  : _openEntry(isRecurring: _tab == 3),
               backgroundColor: AppColors.ink,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add),
-              label: const Text('Add transaction'),
+              label: Text(
+                _tab == 4
+                    ? 'Add goal'
+                    : _tab == 3
+                    ? 'Add schedule'
+                    : 'Add transaction',
+              ),
             )
           : null,
       bottomNavigationBar: NavigationBar(
@@ -172,12 +363,73 @@ class _WalletPageState extends State<WalletPage> {
             icon: Icon(Icons.donut_large_rounded),
             label: 'Insights',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.event_repeat_rounded),
+            label: 'Recurring',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.flag_outlined),
+            selectedIcon: Icon(Icons.flag_rounded),
+            label: 'Goals',
+          ),
         ],
       ),
     ),
   );
 
   List<Widget> _content(WalletState state) {
+    if (_tab == 4) {
+      return [
+        const Text(
+          'Small steps toward what matters.',
+          style: TextStyle(color: AppColors.muted),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Savings goals',
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 24),
+        GoalsPanel(
+          goals: state.goals,
+          busy: state.status == WalletStatus.saving,
+          onEdit: (goal) => _openGoalSheet(goal: goal),
+          onContribute: (goal) =>
+              _openGoalSheet(goal: goal, contribution: true),
+          onHistory: _openGoalHistory,
+          onDelete: _deleteGoal,
+        ),
+      ];
+    }
+    if (_tab == 3) {
+      return [
+        const Text(
+          'Keep the regular things in view.',
+          style: TextStyle(color: AppColors.muted),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Recurring transactions',
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 24),
+        RecurringPanel(
+          schedules: state.schedules,
+          today: DateTime.now(),
+          busy: state.status == WalletStatus.saving,
+          onEdit: (schedule) =>
+              _openEntry(isRecurring: true, schedule: schedule),
+          onRecord: (schedule) => _resolveOccurrence(schedule, record: true),
+          onSkip: (schedule) => _resolveOccurrence(schedule, record: false),
+          onToggle: (schedule) =>
+              context.read<WalletBloc>().add(ScheduleToggled(schedule.id)),
+          onDelete: _deleteSchedule,
+        ),
+      ];
+    }
+    final dueCount = state.schedules
+        .where((s) => s.isDue(DateTime.now()))
+        .length;
     final summary = WalletSummary(state.entries, _month);
     final entries =
         state.entries
@@ -218,6 +470,13 @@ class _WalletPageState extends State<WalletPage> {
       ),
       const SizedBox(height: 24),
       if (_tab == 0) ...[
+        if (dueCount > 0) ...[
+          RecurringReminder(
+            count: dueCount,
+            onReview: () => setState(() => _tab = 3),
+          ),
+          const SizedBox(height: 20),
+        ],
         SectionCard(
           color: AppColors.ink,
           child: Column(
@@ -292,6 +551,13 @@ class _WalletPageState extends State<WalletPage> {
           ),
         ),
         const SizedBox(height: 20),
+        if (state.goals.isNotEmpty) ...[
+          GoalsSummary(
+            goals: state.goals,
+            onView: () => setState(() => _tab = 4),
+          ),
+          const SizedBox(height: 20),
+        ],
       ],
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
