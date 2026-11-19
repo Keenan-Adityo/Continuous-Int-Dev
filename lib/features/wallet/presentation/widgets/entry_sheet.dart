@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
+
+import '../../../../core/presentation/widgets/money_input_field.dart';
 
 import '../../domain/entities/wallet_entry.dart';
 import '../../domain/entities/recurring_transaction.dart';
@@ -232,24 +233,7 @@ class _EntrySheetState extends State<EntrySheet> {
                           : (value) => setState(() => _type = value.first),
                     ),
                     const SizedBox(height: 20),
-                    TextFormField(
-                      controller: _amount,
-                      enabled: !busy,
-                      decoration: const InputDecoration(
-                        labelText: 'Amount (IDR)',
-                        prefixText: 'Rp ',
-                      ),
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      validator: (value) {
-                        final amount = int.tryParse(value ?? '');
-                        return amount == null ||
-                                amount <= 0 ||
-                                amount > 999999999999
-                            ? 'Enter a whole amount from 1 to 999,999,999,999'
-                            : null;
-                      },
-                    ),
+                    MoneyInputField(controller: _amount, enabled: !busy),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _title,

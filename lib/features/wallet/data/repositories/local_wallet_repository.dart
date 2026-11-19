@@ -6,6 +6,7 @@ import '../../domain/repositories/wallet_repository.dart';
 import '../datasources/wallet_file_store.dart';
 import '../models/recurring_transaction_model.dart';
 import '../models/wallet_entry_model.dart';
+import '../models/savings_goal_model.dart';
 
 class LocalWalletRepository implements WalletRepository {
   const LocalWalletRepository(this.store);
@@ -17,7 +18,7 @@ class LocalWalletRepository implements WalletRepository {
       final contents = await store.read();
       if (contents == null) return WalletData();
       final json = jsonDecode(contents) as Map<String, dynamic>;
-      if (json['version'] != 1 && json['version'] != 2) {
+      if (![1, 2, 3].contains(json['version'])) {
         throw const FormatException('Unsupported version');
       }
       final entries = (json['entries'] as List)
@@ -25,6 +26,13 @@ class LocalWalletRepository implements WalletRepository {
           .toList();
       final data = WalletData(
         entries: entries,
+        goals: json['version'] == 3
+            ? (json['goals'] as List)
+                  .map(
+                    (g) => SavingsGoalModel.decode(g as Map<String, dynamic>),
+                  )
+                  .toList()
+            : [],
         schedules: json['version'] == 1
             ? []
             : (json['schedules'] as List)
@@ -37,7 +45,8 @@ class LocalWalletRepository implements WalletRepository {
       );
       if (entries.map((e) => e.id).toSet().length != entries.length ||
           data.schedules.map((s) => s.id).toSet().length !=
-              data.schedules.length) {
+              data.schedules.length ||
+          data.goals.map((g) => g.id).toSet().length != data.goals.length) {
         throw const FormatException('Duplicate records');
       }
       return data;
@@ -53,7 +62,8 @@ class LocalWalletRepository implements WalletRepository {
     try {
       await store.write(
         jsonEncode({
-          'version': 2,
+          'version': 3,
+          'goals': data.goals.map(SavingsGoalModel.encode).toList(),
           'entries': data.entries.map(WalletEntryModel.encode).toList(),
           'schedules': data.schedules
               .map(RecurringTransactionModel.encode)

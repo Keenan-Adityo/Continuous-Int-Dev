@@ -6,6 +6,7 @@ import 'package:continous_int_dev/features/wallet/domain/entities/wallet_data.da
 import 'package:continous_int_dev/features/wallet/domain/entities/wallet_entry.dart';
 
 import 'support/memory_wallet.dart';
+import 'support/widget_helpers.dart';
 
 RecurringTransaction rent({DateTime? due, bool enabled = true}) {
   final date = due ?? calendarDate(DateTime.now());
@@ -20,15 +21,6 @@ RecurringTransaction rent({DateTime? due, bool enabled = true}) {
     frequency: RepeatFrequency.monthly,
     enabled: enabled,
   );
-}
-
-Future<void> tapVisible(WidgetTester tester, Finder finder) async {
-  await tester.pumpAndSettle();
-  await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
-  await tester.pumpAndSettle();
-  expect(finder.hitTestable(), findsOneWidget);
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
 }
 
 void main() {

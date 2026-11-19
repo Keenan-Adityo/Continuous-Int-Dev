@@ -8,10 +8,13 @@ import '../../../../core/presentation/app_theme.dart';
 import '../../../../core/presentation/widgets/section_card.dart';
 import '../../domain/entities/wallet_entry.dart';
 import '../../domain/entities/recurring_transaction.dart';
+import '../../domain/entities/savings_goal.dart';
 import '../../domain/usecases/manage_wallet.dart';
 import '../bloc/wallet_bloc.dart';
 import '../widgets/entry_sheet.dart';
 import '../widgets/recurring_panel.dart';
+import '../widgets/goals_panel.dart';
+import '../widgets/goal_sheets.dart';
 import '../widgets/transaction_tile.dart';
 import '../widgets/wallet_format.dart';
 
@@ -76,6 +79,87 @@ class _WalletPageState extends State<WalletPage> with WidgetsBindingObserver {
           isRecurring: isRecurring,
           schedule: schedule,
         ),
+      ),
+    );
+  }
+
+  void _openGoalSheet({SavingsGoal? goal, bool contribution = false}) {
+    final bloc = context.read<WalletBloc>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: false,
+      enableDrag: false,
+      useSafeArea: true,
+      builder: (_) => BlocProvider.value(
+        value: bloc,
+        child: contribution
+            ? GoalContributionSheet(goal: goal!)
+            : GoalEditorSheet(goal: goal),
+      ),
+    );
+  }
+
+  Future<bool> _confirmGoalAction(
+    String title,
+    String message,
+    String label,
+  ) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(label),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _deleteGoal(SavingsGoal goal) async {
+    final confirmed = await _confirmGoalAction(
+      'Delete savings goal?',
+      'This removes the goal and its contribution history. Your wallet balance and transactions will stay the same.',
+      'Delete goal',
+    );
+    if (confirmed && mounted) {
+      context.read<WalletBloc>().add(GoalDeleted(goal.id));
+    }
+  }
+
+  Future<void> _removeContribution(
+    SavingsGoal goal,
+    GoalContribution contribution,
+  ) async {
+    final confirmed = await _confirmGoalAction(
+      'Undo contribution?',
+      'Remove ${money(contribution.amount)} from this goal’s tracked savings? Your wallet balance will stay the same.',
+      'Undo contribution',
+    );
+    if (confirmed && mounted) {
+      context.read<WalletBloc>().add(
+        GoalContributionRemoved(goal.id, contribution.id),
+      );
+    }
+  }
+
+  void _openGoalHistory(SavingsGoal goal) {
+    final bloc = context.read<WalletBloc>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => BlocProvider.value(
+        value: bloc,
+        child: GoalHistorySheet(goalId: goal.id, onRemove: _removeContribution),
       ),
     );
   }
@@ -245,11 +329,19 @@ class _WalletPageState extends State<WalletPage> with WidgetsBindingObserver {
             ),
       floatingActionButton: state.status == WalletStatus.ready
           ? FloatingActionButton.extended(
-              onPressed: () => _openEntry(isRecurring: _tab == 3),
+              onPressed: () => _tab == 4
+                  ? _openGoalSheet()
+                  : _openEntry(isRecurring: _tab == 3),
               backgroundColor: AppColors.ink,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.add),
-              label: Text(_tab == 3 ? 'Add schedule' : 'Add transaction'),
+              label: Text(
+                _tab == 4
+                    ? 'Add goal'
+                    : _tab == 3
+                    ? 'Add schedule'
+                    : 'Add transaction',
+              ),
             )
           : null,
       bottomNavigationBar: NavigationBar(
@@ -275,12 +367,40 @@ class _WalletPageState extends State<WalletPage> with WidgetsBindingObserver {
             icon: Icon(Icons.event_repeat_rounded),
             label: 'Recurring',
           ),
+          NavigationDestination(
+            icon: Icon(Icons.flag_outlined),
+            selectedIcon: Icon(Icons.flag_rounded),
+            label: 'Goals',
+          ),
         ],
       ),
     ),
   );
 
   List<Widget> _content(WalletState state) {
+    if (_tab == 4) {
+      return [
+        const Text(
+          'Small steps toward what matters.',
+          style: TextStyle(color: AppColors.muted),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Savings goals',
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 24),
+        GoalsPanel(
+          goals: state.goals,
+          busy: state.status == WalletStatus.saving,
+          onEdit: (goal) => _openGoalSheet(goal: goal),
+          onContribute: (goal) =>
+              _openGoalSheet(goal: goal, contribution: true),
+          onHistory: _openGoalHistory,
+          onDelete: _deleteGoal,
+        ),
+      ];
+    }
     if (_tab == 3) {
       return [
         const Text(
@@ -431,6 +551,13 @@ class _WalletPageState extends State<WalletPage> with WidgetsBindingObserver {
           ),
         ),
         const SizedBox(height: 20),
+        if (state.goals.isNotEmpty) ...[
+          GoalsSummary(
+            goals: state.goals,
+            onView: () => setState(() => _tab = 4),
+          ),
+          const SizedBox(height: 20),
+        ],
       ],
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,

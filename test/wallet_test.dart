@@ -1,3 +1,5 @@
+import 'package:continous_int_dev/features/wallet/domain/usecases/manage_savings_goals.dart';
+
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -96,6 +98,7 @@ void main() {
     final bloc = WalletBloc(
       ManageWallet(repository),
       ManageRecurringTransactions(repository),
+      ManageSavingsGoals(repository),
     );
     final loaded = bloc.stream.firstWhere(
       (s) => s.status == WalletStatus.ready,
@@ -120,6 +123,7 @@ void main() {
     final bloc = WalletBloc(
       ManageWallet(repository),
       ManageRecurringTransactions(repository),
+      ManageSavingsGoals(repository),
     );
     final loaded = bloc.stream.firstWhere(
       (s) => s.status == WalletStatus.ready,

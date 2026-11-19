@@ -1,3 +1,5 @@
+import 'package:continous_int_dev/features/wallet/domain/usecases/manage_savings_goals.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -242,6 +244,7 @@ void main() {
       final bloc = WalletBloc(
         ManageWallet(repository),
         ManageRecurringTransactions(repository, clock: () => DateTime(2026, 2)),
+        ManageSavingsGoals(repository),
       );
       addTearDown(bloc.close);
       final loaded = bloc.stream.firstWhere(
@@ -272,6 +275,7 @@ void main() {
       final bloc = WalletBloc(
         ManageWallet(repository),
         ManageRecurringTransactions(repository, clock: () => DateTime(2026, 4)),
+        ManageSavingsGoals(repository),
       );
       addTearDown(bloc.close);
       final loaded = bloc.stream.firstWhere(
@@ -320,7 +324,7 @@ void main() {
       final reopened = await repository.load();
       expect(reopened.entries.single.amount, 5000000);
       expect(reopened.schedules.single.frequency, RepeatFrequency.monthly);
-      expect(jsonDecode(await file.readAsString())['version'], 2);
+      expect(jsonDecode(await file.readAsString())['version'], 3);
     },
   );
 

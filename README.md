@@ -11,6 +11,7 @@ An offline everyday wallet for Android and iOS, built with Flutter, BLoC, and fe
 - See monthly spending grouped by category.
 - Schedule daily, weekly, monthly, or yearly income and expenses.
 - Review in-app due reminders; confirm or skip each occurrence, and pause, edit, or delete schedules.
+- Track savings goals with target amounts, optional target dates, contributions, and progress.
 - Start with an empty wallet; record an opening balance as income if needed.
 
 ## Run
@@ -58,7 +59,7 @@ Dependencies are wired in `lib/main.dart`; domain code has no Flutter dependenci
 
 ## Storage
 
-Transactions and recurring schedules are saved together on this device to `pocket_wallet.json`. Writes flush to a temporary
+Transactions, recurring schedules, and savings goals are saved together on this device to `pocket_wallet.json`. Writes flush to a temporary
 file before replacing the previous file. Failed reads keep the original data and block
 editing; failed writes leave the displayed wallet unchanged. The wallet has no bank
 connection, cloud sync, export, or app-level encryption. Removing the app can remove its
@@ -93,7 +94,28 @@ in leap years. Pause/resume keeps the next unreviewed date. Deleting a schedule
 keeps transactions already recorded. Editing the next due date or frequency
 starts a new date anchor; editing other details preserves it.
 
-Existing version 1 wallet files load without modification and gain an empty
-schedule list. The next successful save writes version 2, including transactions
-and schedules. Older app versions cannot read version 2 files. Invalid wallet
-files remain untouched and cannot be overwritten through the UI.
+Existing version 1 and 2 wallet files load without modification. Missing schedule
+or goal lists start empty. The next successful save writes version 3, including
+transactions, recurring schedules, goals, and contributions. Older app versions
+cannot read version 3 files. Invalid wallet files remain untouched and cannot be
+overwritten through the UI.
+
+## Savings goals
+
+Open **Goals → Add goal** to choose a name, target amount in rupiah, and an
+optional target date. Overview shows tracked savings separately from the wallet
+balance and links to the Goals tab. Each goal displays its saved amount,
+remaining amount, progress, and target-date status. Fully funded goals move to
+Achieved; missed dates remain visible until the goal is completed or edited.
+
+**Add contribution** records savings you have already set aside. Contributions
+are tracking records: they do not move money, create income or expense entries,
+or change the wallet balance. They must be positive, no larger than the remaining
+target, and dated today or earlier. **Contribution history → Undo contribution**
+removes a contribution after confirmation and updates progress. Undoing a deposit
+can reopen an achieved goal.
+
+Edit a goal to rename it, increase its target, or change/remove its target date.
+Existing contributions are preserved; the target cannot be reduced below the
+amount already saved. Deleting a goal requires confirmation and removes its
+contribution history while keeping wallet transactions and schedules.
