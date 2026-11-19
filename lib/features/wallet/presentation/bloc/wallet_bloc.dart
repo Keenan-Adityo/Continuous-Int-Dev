@@ -1,11 +1,16 @@
 import 'package:bloc/bloc.dart';
 
+import '../../domain/entities/recurring_transaction.dart';
+import '../../domain/entities/wallet_data.dart';
 import '../../domain/entities/wallet_entry.dart';
+import '../../domain/usecases/manage_recurring_transactions.dart';
 import '../../domain/usecases/manage_wallet.dart';
 
 sealed class WalletEvent {}
 
 class WalletOpened extends WalletEvent {}
+
+class WalletClockTicked extends WalletEvent {}
 
 class EntrySaved extends WalletEvent {
   EntrySaved(this.entry);
@@ -17,56 +22,97 @@ class EntryDeleted extends WalletEvent {
   final String id;
 }
 
+class ScheduleSaved extends WalletEvent {
+  ScheduleSaved(this.schedule);
+  final RecurringTransaction schedule;
+}
+
+class ScheduleDeleted extends WalletEvent {
+  ScheduleDeleted(this.id);
+  final String id;
+}
+
+class ScheduleToggled extends WalletEvent {
+  ScheduleToggled(this.id);
+  final String id;
+}
+
+class OccurrenceResolved extends WalletEvent {
+  OccurrenceResolved(this.id, this.dueDate, {required this.record});
+  final String id;
+  final DateTime dueDate;
+  final bool record;
+}
+
 enum WalletStatus { loading, ready, saving, failure }
 
 class WalletState {
   WalletState({
     this.status = WalletStatus.loading,
-    List<WalletEntry> entries = const [],
+    WalletData? data,
     this.error,
     this.revision = 0,
-  }) : entries = List.unmodifiable(entries);
+  }) : data = data ?? WalletData();
   final WalletStatus status;
-  final List<WalletEntry> entries;
+  final WalletData data;
+  List<WalletEntry> get entries => data.entries;
+  List<RecurringTransaction> get schedules => data.schedules;
   final String? error;
   final int revision;
 }
 
 class WalletBloc extends Bloc<WalletEvent, WalletState> {
-  WalletBloc(this.wallet) : super(WalletState()) {
-    // A single sequential event stream prevents overlapping writes and lost entries.
+  WalletBloc(this.wallet, this.recurring) : super(WalletState()) {
+    // All writes share one sequential stream to prevent lost or duplicate records.
     on<WalletEvent>(
       _handle,
       transformer: (events, mapper) => events.asyncExpand(mapper),
     );
   }
   final ManageWallet wallet;
+  final ManageRecurringTransactions recurring;
 
   Future<void> _handle(WalletEvent event, Emitter<WalletState> emit) async {
     final previous = state;
     if (event is! WalletOpened && previous.status != WalletStatus.ready) return;
+    if (event is WalletClockTicked) {
+      emit(
+        WalletState(
+          status: previous.status,
+          data: previous.data,
+          revision: previous.revision,
+        ),
+      );
+      return;
+    }
     emit(
       WalletState(
         status: event is WalletOpened
             ? WalletStatus.loading
             : WalletStatus.saving,
-        entries: previous.entries,
+        data: previous.data,
         revision: previous.revision,
       ),
     );
     try {
-      final entries = switch (event) {
+      final data = switch (event) {
         WalletOpened() => await wallet.load(),
-        EntrySaved(:final entry) => await wallet.upsert(
-          previous.entries,
-          entry,
+        EntrySaved(:final entry) => await wallet.upsert(previous.data, entry),
+        EntryDeleted(:final id) => await wallet.remove(previous.data, id),
+        ScheduleSaved(:final schedule) => await recurring.upsert(
+          previous.data,
+          schedule,
         ),
-        EntryDeleted(:final id) => await wallet.remove(previous.entries, id),
+        ScheduleDeleted(:final id) => await recurring.remove(previous.data, id),
+        ScheduleToggled(:final id) => await recurring.toggle(previous.data, id),
+        OccurrenceResolved(:final id, :final dueDate, :final record) =>
+          await recurring.resolve(previous.data, id, dueDate, record: record),
+        WalletClockTicked() => previous.data,
       };
       emit(
         WalletState(
           status: WalletStatus.ready,
-          entries: entries,
+          data: data,
           revision: previous.revision + 1,
         ),
       );
@@ -76,7 +122,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
           status: event is WalletOpened
               ? WalletStatus.failure
               : WalletStatus.ready,
-          entries: previous.entries,
+          data: previous.data,
           error: failure.message,
           revision: previous.revision,
         ),
@@ -87,7 +133,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
           status: event is WalletOpened
               ? WalletStatus.failure
               : WalletStatus.ready,
-          entries: previous.entries,
+          data: previous.data,
           error: 'Something went wrong. Please try again.',
           revision: previous.revision,
         ),

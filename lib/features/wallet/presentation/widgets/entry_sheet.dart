@@ -4,15 +4,20 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/wallet_entry.dart';
+import '../../domain/entities/recurring_transaction.dart';
 import '../bloc/wallet_bloc.dart';
 
 class EntrySheet extends StatefulWidget {
   const EntrySheet({
     super.key,
     this.entry,
+    this.schedule,
+    this.isRecurring = false,
     this.initialType = EntryType.expense,
   });
   final WalletEntry? entry;
+  final RecurringTransaction? schedule;
+  final bool isRecurring;
   final EntryType initialType;
   @override
   State<EntrySheet> createState() => _EntrySheetState();
@@ -27,19 +32,30 @@ class _EntrySheetState extends State<EntrySheet> {
   late Category _category;
   late DateTime _date;
   bool _submitted = false;
+  int _submittedRevision = 0;
+  String? _saveError;
+  late RepeatFrequency _frequency;
 
   @override
   void initState() {
     super.initState();
     final entry = widget.entry;
-    _title = TextEditingController(text: entry?.title);
-    _amount = TextEditingController(text: entry?.amount.toString());
-    _note = TextEditingController(text: entry?.note);
-    _type = entry?.type ?? widget.initialType;
+    final schedule = widget.schedule;
+    _frequency = schedule?.frequency ?? RepeatFrequency.monthly;
+    _title = TextEditingController(text: schedule?.title ?? entry?.title);
+    _amount = TextEditingController(
+      text: (schedule?.amount ?? entry?.amount)?.toString(),
+    );
+    _note = TextEditingController(text: schedule?.note ?? entry?.note);
+    _type = schedule?.type ?? entry?.type ?? widget.initialType;
     _category =
+        schedule?.category ??
         entry?.category ??
         (_type == EntryType.income ? Category.salary : Category.food);
-    _date = entry?.date ?? DateTime.now();
+    _date =
+        schedule?.nextDueDate ??
+        entry?.date ??
+        (widget.isRecurring ? calendarDate(DateTime.now()) : DateTime.now());
   }
 
   @override
@@ -55,14 +71,48 @@ class _EntrySheetState extends State<EntrySheet> {
       context: context,
       initialDate: _date,
       firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
+      lastDate: widget.isRecurring
+          ? DateTime(DateTime.now().year + 20, 12, 31)
+          : DateTime.now(),
     );
     if (date != null && mounted) setState(() => _date = date);
   }
 
   void _save() {
     if (!_form.currentState!.validate()) return;
-    setState(() => _submitted = true);
+    _submittedRevision = context.read<WalletBloc>().state.revision;
+    setState(() {
+      _submitted = true;
+      _saveError = null;
+    });
+    if (widget.isRecurring) {
+      final previous = widget.schedule;
+      final date = calendarDate(_date);
+      context.read<WalletBloc>().add(
+        ScheduleSaved(
+          RecurringTransaction(
+            id:
+                previous?.id ??
+                DateTime.now().microsecondsSinceEpoch.toString(),
+            title: _title.text.trim(),
+            amount: int.parse(_amount.text),
+            type: _type,
+            category: _category,
+            note: _note.text.trim(),
+            frequency: _frequency,
+            enabled: previous?.enabled ?? true,
+            nextDueDate: date,
+            anchorDate:
+                previous != null &&
+                    date == previous.nextDueDate &&
+                    _frequency == previous.frequency
+                ? previous.anchorDate
+                : date,
+          ),
+        ),
+      );
+      return;
+    }
     context.read<WalletBloc>().add(
       EntrySaved(
         WalletEntry(
@@ -101,6 +151,7 @@ class _EntrySheetState extends State<EntrySheet> {
       ),
     );
     if (confirmed == true && mounted) {
+      _submittedRevision = context.read<WalletBloc>().state.revision;
       setState(() => _submitted = true);
       context.read<WalletBloc>().add(EntryDeleted(widget.entry!.id));
     }
@@ -110,10 +161,14 @@ class _EntrySheetState extends State<EntrySheet> {
   Widget build(BuildContext context) => BlocConsumer<WalletBloc, WalletState>(
     listener: (context, state) {
       if (!_submitted || state.status != WalletStatus.ready) return;
+      if (state.revision <= _submittedRevision && state.error == null) return;
       if (state.error == null) {
         Navigator.pop(context);
       } else {
-        setState(() => _submitted = false);
+        setState(() {
+          _submitted = false;
+          _saveError = state.error;
+        });
       }
     },
     builder: (context, state) {
@@ -139,9 +194,13 @@ class _EntrySheetState extends State<EntrySheet> {
                       children: [
                         Expanded(
                           child: Text(
-                            widget.entry == null
-                                ? 'New transaction'
-                                : 'Edit transaction',
+                            widget.isRecurring
+                                ? (widget.schedule == null
+                                      ? 'New schedule'
+                                      : 'Edit schedule')
+                                : (widget.entry == null
+                                      ? 'New transaction'
+                                      : 'Edit transaction'),
                             style: Theme.of(context).textTheme.headlineSmall
                                 ?.copyWith(fontWeight: FontWeight.bold),
                           ),
@@ -222,6 +281,28 @@ class _EntrySheetState extends State<EntrySheet> {
                           ? null
                           : (value) => setState(() => _category = value!),
                     ),
+                    if (widget.isRecurring) ...[
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<RepeatFrequency>(
+                        initialValue: _frequency,
+                        decoration: const InputDecoration(labelText: 'Repeat'),
+                        items: RepeatFrequency.values
+                            .map(
+                              (frequency) => DropdownMenuItem(
+                                value: frequency,
+                                child: Text(frequency.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: busy
+                            ? null
+                            : (value) => setState(() => _frequency = value!),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Choose the first or next due date below. You will confirm each occurrence before it affects your balance.',
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
                       onPressed: busy ? null : _pickDate,
@@ -239,9 +320,24 @@ class _EntrySheetState extends State<EntrySheet> {
                       maxLines: 2,
                     ),
                     const SizedBox(height: 12),
+                    if (_saveError != null) ...[
+                      Text(
+                        _saveError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     FilledButton(
                       onPressed: busy ? null : _save,
-                      child: Text(busy ? 'Saving…' : 'Save transaction'),
+                      child: Text(
+                        busy
+                            ? 'Saving…'
+                            : widget.isRecurring
+                            ? 'Save schedule'
+                            : 'Save transaction',
+                      ),
                     ),
                     if (widget.entry != null)
                       TextButton(

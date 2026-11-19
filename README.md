@@ -9,6 +9,8 @@ An offline everyday wallet for Android and iOS, built with Flutter, BLoC, and fe
 - View your all-time balance and monthly income, expenses, and cash flow.
 - Browse months, search transaction titles/notes/categories, and filter income or expenses.
 - See monthly spending grouped by category.
+- Schedule daily, weekly, monthly, or yearly income and expenses.
+- Review in-app due reminders; confirm or skip each occurrence, and pause, edit, or delete schedules.
 - Start with an empty wallet; record an opening balance as income if needed.
 
 ## Run
@@ -56,7 +58,7 @@ Dependencies are wired in `lib/main.dart`; domain code has no Flutter dependenci
 
 ## Storage
 
-Transactions are saved on this device to `pocket_wallet.json`. Writes flush to a temporary
+Transactions and recurring schedules are saved together on this device to `pocket_wallet.json`. Writes flush to a temporary
 file before replacing the previous file. Failed reads keep the original data and block
 editing; failed writes leave the displayed wallet unchanged. The wallet has no bank
 connection, cloud sync, export, or app-level encryption. Removing the app can remove its
@@ -74,3 +76,24 @@ in [.github/workflow-templates/README.md](.github/workflow-templates/README.md):
 
 Copy a configured template into `.github/workflows/` to activate it. These
 examples are inactive and no distribution credentials are stored in the repository.
+
+## Recurring transactions
+
+Open **Recurring → Add schedule** to enter an amount, title, category, repeat
+frequency, first due date, and optional note. Schedules do not change the balance.
+Due reminders appear on Overview and in Recurring, and refresh when the app
+resumes or while it remains open. This version uses in-app reminders only.
+
+Use **Record occurrence → Confirm record** to record a transaction on its due
+date and advance to the next date in one saved change. **Skip occurrence** advances
+one date without recording money. Missed occurrences are reviewed individually;
+future and paused occurrences cannot be recorded. Monthly dates retain the
+original day after a short month; yearly February 29 schedules regain that date
+in leap years. Pause/resume keeps the next unreviewed date. Deleting a schedule
+keeps transactions already recorded. Editing the next due date or frequency
+starts a new date anchor; editing other details preserves it.
+
+Existing version 1 wallet files load without modification and gain an empty
+schedule list. The next successful save writes version 2, including transactions
+and schedules. Older app versions cannot read version 2 files. Invalid wallet
+files remain untouched and cannot be overwritten through the UI.

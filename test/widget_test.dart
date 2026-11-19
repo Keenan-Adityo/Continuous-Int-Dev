@@ -2,15 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:continous_int_dev/main.dart';
 import 'package:continous_int_dev/features/wallet/domain/entities/wallet_entry.dart';
-import 'package:continous_int_dev/features/wallet/domain/repositories/wallet_repository.dart';
 
-class MemoryWallet implements WalletRepository {
-  List<WalletEntry> entries = [];
-  @override
-  Future<List<WalletEntry>> load() async => entries;
-  @override
-  Future<void> save(List<WalletEntry> entries) async => this.entries = entries;
-}
+import 'support/memory_wallet.dart';
 
 void main() {
   testWidgets('add, edit, filter and delete a transaction', (tester) async {

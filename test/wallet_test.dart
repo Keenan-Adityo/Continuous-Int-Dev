@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:continous_int_dev/features/wallet/data/datasources/wallet_file_store.dart';
 import 'package:continous_int_dev/features/wallet/data/repositories/local_wallet_repository.dart';
 import 'package:continous_int_dev/features/wallet/domain/entities/wallet_entry.dart';
+import 'package:continous_int_dev/features/wallet/domain/entities/wallet_data.dart';
+import 'package:continous_int_dev/features/wallet/domain/usecases/manage_recurring_transactions.dart';
 import 'package:continous_int_dev/features/wallet/domain/repositories/wallet_repository.dart';
 import 'package:continous_int_dev/features/wallet/domain/usecases/manage_wallet.dart';
 import 'package:continous_int_dev/features/wallet/presentation/bloc/wallet_bloc.dart';
@@ -24,9 +26,10 @@ WalletEntry entry(
 
 class FailingWallet implements WalletRepository {
   @override
-  Future<List<WalletEntry>> load() async => [entry('existing', 100)];
+  Future<WalletData> load() async =>
+      WalletData(entries: [entry('existing', 100)]);
   @override
-  Future<void> save(List<WalletEntry> entries) async =>
+  Future<void> save(WalletData data) async =>
       throw const WalletFailure('Save failed');
 }
 
@@ -50,13 +53,13 @@ void main() {
     LocalWalletRepository repository() =>
         LocalWalletRepository(WalletFileStore(() async => directory));
     final wallet = ManageWallet(repository());
-    expect(await wallet.load(), isEmpty);
-    final first = await wallet.upsert([], entry('1', 500));
+    expect((await wallet.load()).entries, isEmpty);
+    final first = await wallet.upsert(WalletData(), entry('1', 500));
     await wallet.upsert(first, entry('1', 750));
     final loaded = await repository().load();
-    expect(loaded.single.amount, 750);
+    expect(loaded.entries.single.amount, 750);
     await wallet.remove(loaded, '1');
-    expect(await repository().load(), isEmpty);
+    expect((await repository().load()).entries, isEmpty);
   });
 
   test(
@@ -79,17 +82,21 @@ void main() {
   test('invalid amounts are rejected before persistence', () async {
     final wallet = ManageWallet(FailingWallet());
     await expectLater(
-      wallet.upsert([], entry('1', 0)),
+      wallet.upsert(WalletData(), entry('1', 0)),
       throwsA(isA<WalletFailure>()),
     );
     await expectLater(
-      wallet.upsert([], entry('1', -1)),
+      wallet.upsert(WalletData(), entry('1', -1)),
       throwsA(isA<WalletFailure>()),
     );
   });
 
   test('bloc retains entries and reports failed writes', () async {
-    final bloc = WalletBloc(ManageWallet(FailingWallet()));
+    final repository = FailingWallet();
+    final bloc = WalletBloc(
+      ManageWallet(repository),
+      ManageRecurringTransactions(repository),
+    );
     final loaded = bloc.stream.firstWhere(
       (s) => s.status == WalletStatus.ready,
     );
@@ -110,7 +117,10 @@ void main() {
     final repository = LocalWalletRepository(
       WalletFileStore(() async => directory),
     );
-    final bloc = WalletBloc(ManageWallet(repository));
+    final bloc = WalletBloc(
+      ManageWallet(repository),
+      ManageRecurringTransactions(repository),
+    );
     final loaded = bloc.stream.firstWhere(
       (s) => s.status == WalletStatus.ready,
     );
@@ -122,7 +132,7 @@ void main() {
     bloc.add(EntrySaved(entry('1', 100)));
     bloc.add(EntrySaved(entry('2', 200)));
     await saved;
-    expect((await repository.load()).length, 2);
+    expect((await repository.load()).entries.length, 2);
     await bloc.close();
   });
 }

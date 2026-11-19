@@ -1,33 +1,34 @@
+import '../entities/wallet_data.dart';
 import '../entities/wallet_entry.dart';
 import '../repositories/wallet_repository.dart';
+import 'transaction_validation.dart';
 
 class ManageWallet {
   const ManageWallet(this.repository);
   final WalletRepository repository;
-  Future<List<WalletEntry>> load() => repository.load();
+  Future<WalletData> load() => repository.load();
 
-  Future<List<WalletEntry>> upsert(
-    List<WalletEntry> entries,
-    WalletEntry entry,
-  ) async {
-    if (entry.title.trim().isEmpty || entry.title.length > 80) {
-      throw const WalletFailure('Enter a title of 1–80 characters.');
-    }
-    if (entry.amount <= 0 || entry.amount > 999999999999) {
-      throw const WalletFailure(
-        'Enter an amount from Rp 1 to Rp 999,999,999,999.',
-      );
-    }
+  Future<WalletData> upsert(WalletData data, WalletEntry entry) async {
+    validateTransactionDetails(
+      id: entry.id,
+      title: entry.title,
+      amount: entry.amount,
+      note: entry.note,
+    );
     if (entry.date.isAfter(DateTime.now())) {
       throw const WalletFailure('Choose today or an earlier date.');
     }
-    final updated = [...entries.where((e) => e.id != entry.id), entry];
+    final updated = data.copyWith(
+      entries: [...data.entries.where((e) => e.id != entry.id), entry],
+    );
     await repository.save(updated);
     return updated;
   }
 
-  Future<List<WalletEntry>> remove(List<WalletEntry> entries, String id) async {
-    final updated = entries.where((e) => e.id != id).toList();
+  Future<WalletData> remove(WalletData data, String id) async {
+    final updated = data.copyWith(
+      entries: data.entries.where((e) => e.id != id).toList(),
+    );
     await repository.save(updated);
     return updated;
   }
